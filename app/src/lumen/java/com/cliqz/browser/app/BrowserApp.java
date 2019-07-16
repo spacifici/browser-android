@@ -7,6 +7,9 @@ import com.cliqz.browser.BuildConfig;
 import com.cliqz.browser.CliqzConfig;
 import com.cliqz.browser.purchases.PurchasesManager;
 import com.revenuecat.purchases.Purchases;
+import de.blinkt.openvpn.core.StatusListener;
+import io.sentry.Sentry;
+import io.sentry.android.AndroidSentryClientFactory;
 
 import javax.inject.Inject;
 
@@ -35,7 +38,6 @@ public class BrowserApp extends BaseBrowserApp {
         getAppComponent().inject(this);
         setupSubscriptionSDK();
     }
-
     //@TODO Remove hardcoded imports once the integration with server is done
     private void importVpnProfiles() {
         final ProfileManager profileManager = ProfileManager.getInstance(getApplicationContext());

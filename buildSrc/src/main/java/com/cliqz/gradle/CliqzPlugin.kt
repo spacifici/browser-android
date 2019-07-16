@@ -43,7 +43,7 @@ class CliqzPlugin: Plugin<Project> {
             it.dependsOn(assembleProvider, assembleTestProvider)
         }
     }
-
+  
     private fun createCliqzConfigTasks(project: Project, variant: ApplicationVariant) {
         val buildConfigProvider = variant.generateBuildConfigProvider
         val javaCompileProvider = variant.javaCompileProvider
