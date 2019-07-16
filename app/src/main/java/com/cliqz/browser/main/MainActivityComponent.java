@@ -1,8 +1,9 @@
 package com.cliqz.browser.main;
 
+import com.cliqz.browser.controlcenter.ControlCenterHelper;
 import com.cliqz.browser.main.search.Incognito;
 import com.cliqz.browser.main.search.SearchView;
-import com.cliqz.browser.overview.OverviewFragment;
+import com.cliqz.browser.overview.CommonOverviewFragment;
 import com.cliqz.browser.overview.TabOverviewFragment;
 import com.cliqz.browser.utils.PasswordManager;
 import com.cliqz.browser.webview.BaseWebView;
@@ -31,7 +32,7 @@ interface MainActivityComponent {
 
     void inject(CliqzWebView cliqzWebView);
 
-    void inject(OverviewFragment overviewFragment);
+    void inject(CommonOverviewFragment overviewFragment);
 
     void inject(TabOverviewFragment tabOverviewFragment);
 
@@ -46,4 +47,6 @@ interface MainActivityComponent {
     void inject(PasswordManager passwordManager);
 
     void inject(Incognito incognito);
+
+    void inject(ControlCenterHelper controlCenterHelper);
 }

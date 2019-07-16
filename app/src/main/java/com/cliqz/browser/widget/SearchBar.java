@@ -3,7 +3,6 @@ package com.cliqz.browser.widget;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.res.Resources;
-import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -24,9 +23,10 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.appcompat.widget.AppCompatImageView;
 import androidx.core.content.ContextCompat;
-import androidx.vectordrawable.graphics.drawable.VectorDrawableCompat;
 
+import com.cliqz.browser.BuildConfig;
 import com.cliqz.browser.R;
 import com.cliqz.browser.app.BrowserApp;
 import com.cliqz.browser.main.Messages;
@@ -35,7 +35,6 @@ import com.cliqz.nove.Bus;
 import com.cliqz.nove.Subscribe;
 
 import java.util.Locale;
-import java.util.Objects;
 
 import javax.inject.Inject;
 
@@ -49,11 +48,15 @@ import butterknife.ButterKnife;
  */
 public class SearchBar extends FrameLayout {
 
+    public static final String HTTPS_PREFIX = "HTTPS://";
+    public static final String HTTP_PREFIX = "HTTP://";
     private float scaleX;
     private float scaleY;
     private float pivotX;
     private float pivotY;
     private AnimatedProgressBar progressBar;
+    private boolean mShowSearchEditTextAnimationRunning = false;
+    private boolean mShowTitleBarAnimationRunning = false;
 
     public interface Listener extends TextWatcher, OnFocusChangeListener {
         void onTitleClicked(SearchBar searchBar);
@@ -65,6 +68,9 @@ public class SearchBar extends FrameLayout {
 
     @Inject
     QueryManager queryManager;
+
+    @BindView(R.id.icon_lock)
+    AppCompatImageView lock;
 
     @BindView(R.id.title_bar)
     TextView titleBar;
@@ -79,6 +85,10 @@ public class SearchBar extends FrameLayout {
 
     @Nullable
     Listener mListener;
+
+    @Nullable
+    @BindView(R.id.reader_mode_button)
+    View readerModeButton;
 
     @Inject
     Bus bus;
@@ -97,10 +107,6 @@ public class SearchBar extends FrameLayout {
         bus.register(this);
         inflate(getContext(), R.layout.search_bar_widget, this);
         ButterKnife.bind(this);
-        final Drawable clearIcon = VectorDrawableCompat.create(
-                context.getResources(), R.drawable.ic_clear_black, null);
-        final int clearIconHeight = Objects.requireNonNull(clearIcon).getIntrinsicHeight();
-        titleBar.setHeight(clearIconHeight);
         if (trackerCounter != null) {
             trackerCounter.setFocusable(false);
             trackerCounter.setFocusableInTouchMode(false);
@@ -182,27 +188,59 @@ public class SearchBar extends FrameLayout {
     }
 
     public void showSearchEditText() {
-        progressBar.setVisibility(GONE);
-        //Don't redo the animation if the edittext is already visible
-        if (searchEditText.getVisibility() == VISIBLE) {
+        if (mShowSearchEditTextAnimationRunning || searchEditText.getVisibility() == VISIBLE) {
             return;
         }
-        // Postpone the animation in order to avoid the SearchEditText to intercept the same
-        // touch event that shown it
-        post(() -> {
-            searchEditText.setVisibility(VISIBLE);
-            final Animation animation = new ScaleAnimation(scaleX, 1.0f, scaleY, 1.0f, pivotX, pivotY);
-            animation.setDuration(150);
-            searchEditText.startAnimation(animation);
-            requestSearchFocus();
+        mShowSearchEditTextAnimationRunning = true;
+
+        progressBar.setVisibility(GONE);
+        final Animation animation = new ScaleAnimation(scaleX, 1.0f, scaleY, 1.0f, pivotX, pivotY);
+        animation.setDuration(150);
+        animation.setAnimationListener(new Animation.AnimationListener() {
+            @Override
+            public void onAnimationStart(Animation animation) {
+                searchEditText.setVisibility(VISIBLE);
+                requestSearchFocus();
+            }
+
+            @Override
+            public void onAnimationEnd(Animation animation) {
+                mShowSearchEditTextAnimationRunning = false;
+            }
+
+            @Override
+            public void onAnimationRepeat(Animation animation) {
+
+            }
         });
+        searchEditText.startAnimation(animation);
     }
 
     public void showTitleBar() {
+        if (mShowTitleBarAnimationRunning || searchEditText.getVisibility() != VISIBLE) {
+            return;
+        }
+        mShowTitleBarAnimationRunning = true;
         final Animation animation = new ScaleAnimation(1.0f, scaleX, 1.0f, scaleY, pivotX, pivotY);
         animation.setDuration(150);
+        animation.setAnimationListener(new Animation.AnimationListener() {
+            @Override
+            public void onAnimationStart(Animation animation) {
+                searchEditText.clearFocus();
+            }
+
+            @Override
+            public void onAnimationEnd(Animation animation) {
+                searchEditText.setVisibility(GONE);
+                mShowTitleBarAnimationRunning = false;
+            }
+
+            @Override
+            public void onAnimationRepeat(Animation animation) {
+
+            }
+        });
         searchEditText.startAnimation(animation);
-        searchEditText.setVisibility(View.GONE);
     }
 
     public void showProgressBar() {
@@ -226,7 +264,7 @@ public class SearchBar extends FrameLayout {
                 searchEditText.setSelection(0,getSearchText().length()), 200);
     }
 
-    public void setTitle(String title) {
+    public void setTitle(@Nullable String title) {
         // Be sure to not set the trampoline as the title
         final String nnTitle = title == null ? "" : title;
         final Uri titleAsUri = Uri.parse(nnTitle);
@@ -234,7 +272,20 @@ public class SearchBar extends FrameLayout {
                 .getQueryParameter(TrampolineConstants.TRAMPOLINE_COMMAND_PARAM_NAME) != null) {
             return;
         }
-        titleBar.setText(title);
+        final String upperCaseTitle = nnTitle.toUpperCase();
+        final String cleanTitle;
+        if (upperCaseTitle.startsWith(HTTPS_PREFIX)) {
+            cleanTitle = nnTitle.substring(HTTPS_PREFIX.length());
+        } else if (upperCaseTitle.startsWith(HTTP_PREFIX)) {
+            cleanTitle = nnTitle.substring(HTTP_PREFIX.length());
+        } else {
+            cleanTitle = nnTitle;
+        }
+        titleBar.setText(cleanTitle);
+    }
+
+    public void setSecure(boolean secure) {
+        lock.setVisibility(secure ? VISIBLE : GONE);
     }
 
     public void setQuery(String query) {
@@ -280,8 +331,14 @@ public class SearchBar extends FrameLayout {
         if (event.getAction() != MotionEvent.ACTION_DOWN) {
             return super.onInterceptTouchEvent(event);
         }
+
         if (antiTrackingDetails != null && antiTrackingDetails.getVisibility() == VISIBLE
                 && event.getX() >= antiTrackingDetails.getX()) {
+            return super.onInterceptTouchEvent(event);
+        }
+
+        if (readerModeButton != null && readerModeButton.getVisibility() == VISIBLE
+                && event.getX() >= readerModeButton.getX()) {
             return super.onInterceptTouchEvent(event);
         }
 
@@ -304,17 +361,38 @@ public class SearchBar extends FrameLayout {
      * @param isIncognito True if the current tab is in incognito mode
      */
     public void setStyle(boolean isIncognito) {
-        if (isIncognito) {
-            searchEditText.setTextColor(ContextCompat.getColor(getContext(), R.color.url_bar_text_color_incognito));
-            searchEditText.setBackgroundColor(ContextCompat.getColor(getContext(), R.color.url_bar_bg_incognito));
-            titleBar.setTextColor(ContextCompat.getColor(getContext(), R.color.url_bar_text_color_incognito));
-            titleBar.setBackgroundColor(ContextCompat.getColor(getContext(), R.color.url_bar_bg_incognito));
+        final Context context = getContext();
+        if (BuildConfig.IS_NOT_LUMEN) {
+            if (isIncognito) {
+                searchEditText.setTextColor(ContextCompat.getColor(context, R.color.url_bar_text_color_incognito));
+                searchEditText.setBackgroundColor(ContextCompat.getColor(context, R.color.url_bar_bg_incognito));
+                titleBar.setTextColor(ContextCompat.getColor(context, R.color.url_bar_text_color_incognito));
+                titleBar.setBackgroundColor(ContextCompat.getColor(context, R.color.url_bar_bg_incognito));
+            } else {
+                searchEditText.setTextColor(ContextCompat.getColor(context, R.color.url_bar_text_color_normal));
+                searchEditText.setBackgroundColor(ContextCompat.getColor(context, R.color.url_bar_bg_normal));
+                titleBar.setTextColor(ContextCompat.getColor(context, R.color.url_bar_text_color_normal));
+                titleBar.setBackgroundColor(ContextCompat.getColor(context, R.color.url_bar_bg_normal));
+            }
         } else {
-            searchEditText.setTextColor(ContextCompat.getColor(getContext(), R.color.url_bar_text_color_normal));
-            searchEditText.setBackgroundColor(ContextCompat.getColor(getContext(), R.color.url_bar_bg_normal));
-            titleBar.setTextColor(ContextCompat.getColor(getContext(), R.color.url_bar_text_color_normal));
-            titleBar.setBackgroundColor(ContextCompat.getColor(getContext(), R.color.url_bar_bg_normal));
+            if (isIncognito) {
+                searchEditText.setTextColor(ContextCompat.getColor(context, R.color.url_bar_text_color_incognito));
+                searchEditText.setBackgroundColor(ContextCompat.getColor(context, R.color.url_bar_bg_incognito));
+                titleBar.setTextColor(ContextCompat.getColor(context, R.color.url_bar_text_color_incognito));
+                titleBar.setBackgroundColor(ContextCompat.getColor(context, R.color.url_bar_bg_incognito));
+            } else {
+                searchEditText.setTextColor(ContextCompat.getColor(context, R.color.url_bar_text_color_normal));
+                searchEditText.setBackgroundColor(ContextCompat.getColor(context, R.color.url_bar_bg_normal));
+                titleBar.setTextColor(ContextCompat.getColor(context, R.color.url_bar_text_color_normal));
+                titleBar.setBackgroundColor(ContextCompat.getColor(context, R.color.url_bar_bg_normal));
+            }
         }
+    }
+
+    @Override
+    public void clearFocus() {
+        searchEditText.clearFocus();
+        super.clearFocus();
     }
 
     private class ListenerWrapper implements TextWatcher, OnFocusChangeListener {
@@ -348,9 +426,12 @@ public class SearchBar extends FrameLayout {
 
             if (hasFocus) {
                 post(SearchBar.this::showKeyBoard);
-            } else {
-                showTitleBar();
+                bus.post(new Messages.DismissVpnPanel());
+                bus.post(new Messages.DismissControlCenter());
             }
+//            } else {
+//                showTitleBar();
+//            }
         }
     }
 }

@@ -15,6 +15,7 @@
     <color name="url_bar_text_color_normal">@color/white</color>
     <color name="url_bar_bg_incognito">#464857</color>
     <color name="url_bar_text_color_incognito">@color/white</color>
+    <color name="url_bar_hint_text_color">#9AFFFFFF</color>
     <color name="icon_light_theme">#FFFFFFFF</color>
     <color name="icon_dark_theme">#FF000000</color>
 
@@ -39,4 +40,12 @@
     <color name="dark_transparent_overlay">#99000000</color>
     <color name="bond_disabled_state_color">#BDC0CE</color>
     <color name="lumen_color_blue_secondary">#304572</color>
+    <color name="lumen_color_blue_primary">#1B9CFC</color>
+    <color name="lumen_color_background">#0D1429</color>
+    <color name="lumen_color_grey_text">#80FFFFFF</color>
+    <color name="lumen_disabled_gray">#4E5363</color>
+    <color name="lumen_color_blue_primary_opaque">#801B9CFC</color>
+
+    <color name="tabs_overview_background_color">@color/primary_color</color>
+    <color name="tabs_overview_floating_button_color">@color/bond_general_color_blue</color>
 </resources>

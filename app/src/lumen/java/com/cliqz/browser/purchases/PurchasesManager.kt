@@ -4,7 +4,7 @@ import acr.browser.lightning.preference.PreferenceManager
 import android.content.Context
 import android.util.Log
 import com.cliqz.browser.main.Messages
-import com.cliqz.browser.purchases.SubscriptionConstants.Product
+import com.cliqz.browser.purchases.SubscriptionConstants.ProductId
 import com.cliqz.browser.purchases.trial.ServerData
 import com.cliqz.browser.purchases.trial.TrialPeriodLocalRepo
 import com.cliqz.browser.purchases.trial.TrialPeriodRemoteRepo
@@ -36,8 +36,6 @@ class PurchasesManager(
     override fun onTrialPeriodResponse(serverData: ServerData?) {
         this.serverData = serverData
         isLoading = false
-        preferenceManager.adBlockEnabled = serverData == null || serverData.isInTrial
-        preferenceManager.isAttrackEnabled = serverData == null || serverData.isInTrial
 
         bus.post(Messages.OnTrialPeriodResponse())
     }
@@ -46,26 +44,23 @@ class PurchasesManager(
         if (purchaserInfo.activeSubscriptions.isNotEmpty()) {
             // If subscribed, enable features.
             for (sku in purchaserInfo.activeSubscriptions) {
-                val isVpnEnabled = sku == Product.VPN || sku == Product.BASIC_VPN
-                val isDashboardEnabled = sku == Product.BASIC || sku == Product.BASIC_VPN
+                val isVpnEnabled = sku in setOf(ProductId.VPN, ProductId.VPN_STAGING,
+                        ProductId.BASIC_VPN, ProductId.BASIC_VPN_STAGING)
+                val isDashboardEnabled = sku in setOf(ProductId.BASIC, ProductId.BASIC_STAGING,
+                        ProductId.BASIC_VPN, ProductId.BASIC_VPN_STAGING)
                 purchase.apply {
                     this.isASubscriber = true
                     this.isVpnEnabled = isVpnEnabled
                     this.isDashboardEnabled = isDashboardEnabled
                     this.sku = sku
                 }
-                if (!isDashboardEnabled) {
-                    preferenceManager.adBlockEnabled = false
-                    preferenceManager.isAttrackEnabled = false
-                }
             }
             isLoading = false
         } else {
             purchase.isASubscriber = false
-            // Check if in trial period.
-            this.loadTrialPeriodInfo(this@PurchasesManager)
         }
-
+        // Get Trial Period data and vpn username, password.
+        this.loadTrialPeriodInfo(this@PurchasesManager)
     }
 
     override fun onError(error: PurchasesError) {

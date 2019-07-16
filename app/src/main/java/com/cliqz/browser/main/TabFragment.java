@@ -86,6 +86,7 @@ import org.json.JSONObject;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.lang.reflect.Field;
 import java.net.URLDecoder;
 
 import javax.inject.Inject;
@@ -103,10 +104,6 @@ import butterknife.OnClick;
 import butterknife.OnEditorAction;
 import butterknife.Optional;
 
-/**
- * @author Stefano Pacifici
- * @author Moaz Mohamed
- */
 public class TabFragment extends BaseFragment implements LightningView.LightingViewListener {
 
     @SuppressWarnings("unused")
@@ -118,6 +115,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
     public static final String KEY_TAB_ID = "tab_id";
     public static final String KEY_TITLE = "tab_title";
     public static final String KEY_FORCE_RESTORE = "tab_force_restore";
+    public static final String KEY_OPEN_VPN_PANEL = "open_vpn_panel";
 
     private OverFlowMenu mOverFlowMenu = null;
     protected boolean mIsIncognito = false;
@@ -127,6 +125,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
     private CliqzMessages.OpenLink mOverviewEvent = null;
     // indicate that we should not load the mInitialUrl because we are restoring a persisted tab
     private boolean mShouldRestore = false;
+    private boolean mShouldShowVpnPanel = false;
     private String mSearchEngine;
     private Message newTabMessage = null;
     private String mExternalQuery = null;
@@ -145,6 +144,8 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
     protected boolean mShowWebPageAgain = false;
     private boolean mRequestDesktopSite = false;
     private boolean mIsReaderModeOn = false;
+
+    private VpnPanel mVpnPanel;
 
     @BindView(R.id.local_container)
     FrameLayout localContainer;
@@ -229,6 +230,9 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
     @Inject
     VpnHandler vpnHandler;
 
+    @Inject
+    MainActivityHandler mainActivityHandler;
+
     private String mDomainName = "";
 
     @NonNull
@@ -285,12 +289,14 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
         if (mInitialTitle != null) {
             state.setTitle(mInitialTitle);
         }
+        mShouldShowVpnPanel = arguments.getBoolean(KEY_OPEN_VPN_PANEL);
         // We need to remove the key, otherwise the url/query/msg gets reloaded for each resume
         arguments.remove(KEY_URL);
         arguments.remove(KEY_NEW_TAB_MESSAGE);
         arguments.remove(KEY_QUERY);
         arguments.remove(KEY_TAB_ID);
         arguments.remove(KEY_FORCE_RESTORE);
+        arguments.remove(KEY_OPEN_VPN_PANEL);
     }
 
     // Use this to get which view is visible between home, cards or web
@@ -329,7 +335,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
         }
 
         mControlCenterHelper =
-                new ControlCenterHelper(getChildFragmentManager());
+                new ControlCenterHelper(getContext(), getChildFragmentManager());
 
         if (openTabsCounter != null) {
             openTabsCounter.setCounter(tabsManager.getTabCount());
@@ -373,7 +379,6 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
             }
         });
         onPageFinished(null);
-        updateCCIcon();
     }
 
     private void updateVpnIcon() {
@@ -386,11 +391,16 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
         }
     }
 
-    private void updateCCIcon() {
+    private void updateCCIcon(boolean isLoadingFinished) {
         if (BuildConfig.IS_LUMEN) {
+            final String url = mLightningView.getWebView().getUrl();
+            if (url != null && url.contains(TrampolineConstants.TRAMPOLINE_COMMAND_PARAM_NAME)) {
+                return; //We don't update dashboard icon states for trampoline redirects
+            }
             if (purchasesManager.isDashboardEnabled() && preferenceManager.getAdBlockEnabled()
                     && preferenceManager.isAttrackEnabled()) {
-                ccIcon.setImageResource(getFlavorDrawable("ic_dashboard_on"));
+                ccIcon.setImageResource(getFlavorDrawable(isLoadingFinished
+                        ? "ic_dashboard_checked" : "ic_dashboard_on"));
             } else {
                 ccIcon.setImageResource(getFlavorDrawable("ic_dashboard_off"));
             }
@@ -410,7 +420,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
             mDelayedUrl = null;
         }
     }
-
+    
     @Override
     public void onResume() {
         super.onResume();
@@ -496,6 +506,14 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
         queryManager.setForgetMode(mIsIncognito);
         mIsReaderModeOn = false;
         readerModeButton.setImageResource(R.drawable.ic_reader_mode_off);
+        updateCCIcon(progressBar.getProgress() == 100);
+        updateVpnIcon();
+        if (mShouldShowVpnPanel) {
+            getView().post(() -> {
+                toggleVpnView();
+                mShouldShowVpnPanel = false;
+            });
+        }
     }
 
     @Override
@@ -551,6 +569,8 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
             mOverFlowMenu.setDesktopSiteEnabled(mRequestDesktopSite);
             mOverFlowMenu.show();
             hideKeyboard(null);
+            bus.post(new Messages.DismissControlCenter());
+            bus.post(new Messages.DismissVpnPanel());
         }
     }
 
@@ -628,8 +648,15 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
     @Optional
     @OnClick(R.id.vpn_panel_button)
     void toggleVpnView() {
-        final VpnPanel vpnPanel = VpnPanel.create(mStatusBar);
-        vpnPanel.show(getChildFragmentManager(), Constants.VPN_PANEL);
+        if (mVpnPanel != null && mVpnPanel.isVisible()) {
+            mVpnPanel.getDialog().dismiss();
+            return;
+        }
+        mVpnPanel = VpnPanel.create(mStatusBar);
+        mVpnPanel.show(getChildFragmentManager(), Constants.VPN_PANEL);
+        mainActivityHandler.postDelayed(() -> {
+            bus.post(new Messages.DismissControlCenter());
+        }, 500);
     }
 
     @SuppressWarnings("UnusedParameters")
@@ -687,7 +714,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
             // This if avoids calling searchBar.showTitleBar() multiple times and sending the same
             // telemetry signals multiple times
             if (set != null && imm.isActive(set)) {
-                searchBar.showTitleBar();
+                //searchBar.showTitleBar();
                 final String view = getTelemetryView();
                 telemetry.sendKeyboardSignal(false, mIsIncognito, getTelemetryView());
                 telemetry.sendQuickAccessBarSignal(TelemetryKeys.HIDE, null, view);
@@ -741,6 +768,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
         if (url != null && !url.isEmpty() && !url.contains(TrampolineConstants.TRAMPOLINE_COMMAND_PARAM_NAME)) {
             state.setUrl(url);
             searchBar.setTitle(url);
+            searchBar.setSecure(isHttpsUrl(url));
         }
     }
 
@@ -748,7 +776,9 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
         final WebView webView = mLightningView.getWebView();
         searchBar.showTitleBar();
         searchBar.showProgressBar();
-        searchBar.setTitle(BuildConfig.IS_LUMEN ? webView.getUrl() : webView.getTitle());
+        final String url = webView.getUrl();
+        searchBar.setTitle(BuildConfig.IS_LUMEN ? url : webView.getTitle());
+        searchBar.setSecure(isHttpsUrl(url));
         searchBar.setAntiTrackingDetailsVisibility(View.VISIBLE);
         webView.setAnimation(animation);
         webView.bringToFront();
@@ -762,6 +792,10 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
         } catch (NoInstanceException e) {
             Log.e(TAG, "Null context", e);
         }
+    }
+
+    private boolean isHttpsUrl(@Nullable String url) {
+        return url != null && url.startsWith("https://");
     }
 
     private void updateToolbarContainer(@NonNull Context context, boolean isBackgroundEnabled) {
@@ -807,6 +841,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
                 Log.e(TAG, "Problem reading the file readability.js", e);
             }
         }
+        updateCCIcon(true);
     }
 
     private ValueCallback<String> readabilityCallBack = new ValueCallback<String>() {
@@ -872,6 +907,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
         final String url = builder.build().toString();
         mLightningView.loadUrl(url);
         searchBar.setTitle(eventUrl);
+        searchBar.setSecure(isHttpsUrl(eventUrl));
         bringWebViewToFront(animation);
         if (quickAccessBar != null) {
             quickAccessBar.hide();
@@ -997,9 +1033,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
 
     @Subscribe
     public void shareLink(Messages.ShareLink event) {
-        if (state.getMode() == Mode.SEARCH) {
-            searchView.requestCardUrl();
-        } else {
+        if (state.getMode() != Mode.SEARCH) {
             final String url = mLightningView.getUrl();
             shareText(url);
             telemetry.sendShareSignal(TelemetryKeys.WEB);
@@ -1220,6 +1254,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
             status = event.status;
         }
         ccIcon.setImageLevel(status.ordinal());
+        updateCCIcon(false);
     }
 
     @Subscribe
@@ -1244,7 +1279,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
     @Subscribe
     public void keyBoardClosed(Messages.KeyBoardClosed event) {
         searchBar.setTitle(searchBar.getQuery());
-        searchBar.showTitleBar();
+        searchBar.clearFocus(); // .showTitleBar();
     }
 
     @Subscribe
@@ -1344,7 +1379,7 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
 
     @Subscribe
     public void onDashboardStateChange(Messages.onDashboardStateChange message) {
-        updateCCIcon();
+        updateCCIcon(false);
     }
 
     @Subscribe
@@ -1366,6 +1401,17 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
         }
     }
 
+    @Subscribe
+    void onGoToFavorites(@NonNull Messages.GoToFavorites msg) {
+        if (BuildConfig.IS_NOT_LUMEN) {
+            return;
+        }
+
+        state.setMode(Mode.SEARCH);
+        searchBar.showSearchEditText();
+        searchView.showFavorites();
+    }
+
     private void updateUI() {
         try {
             final Activity activity = FragmentUtilsV4.getActivity(this);
@@ -1373,15 +1419,25 @@ public class TabFragment extends BaseFragment implements LightningView.LightingV
             final Context wrapper = new ContextThemeWrapper(activity, themeId);
             final Resources.Theme theme = wrapper.getTheme();
 
-            final TypedArray typedArray = theme.obtainStyledAttributes(new int[]{
-                    R.attr.colorPrimary,
-                    R.attr.colorPrimaryDark,
-                    R.attr.textColorPrimary,
-            });
-            final int iconColor = typedArray.getColor(2,
-                    ContextCompat.getColor(wrapper, R.color.text_color_primary));
-            final int statusBarColor = typedArray.getColor(1,
+            int[] attrs;
+            try {
+                final Field field = android.R.attr.class.getDeclaredField("statusBarColor");
+                final int attr = field.getInt(null);
+                attrs = new int[] {
+                        attr,
+                        R.attr.textColorPrimary,
+                };
+            } catch (Throwable e) {
+                attrs = new int[] {
+                        R.attr.colorPrimaryDark,
+                        R.attr.textColorPrimary
+                };
+            }
+            final TypedArray typedArray = theme.obtainStyledAttributes(attrs);
+            final int statusBarColor = typedArray.getColor(typedArray.getIndex(0),
                     ContextCompat.getColor(wrapper, R.color.primary_color_dark));
+            final int iconColor = typedArray.getColor(typedArray.getIndex(1),
+                    ContextCompat.getColor(wrapper, R.color.text_color_primary));
             typedArray.recycle();
             overflowMenuIcon.getDrawable().setColorFilter(iconColor, PorterDuff.Mode.SRC_ATOP);
             updateToolbarContainer(activity, preferenceManager.isBackgroundImageEnabled());
